@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#07122A">
+<title>Prompter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0E1E3A; --navy-deep:#07122A; --copper:#C27A44; --copper-soft:#E3A877;
+  --ink:#F2F4F8; --mute:#9AA6BD; --line:rgba(194,122,68,.45);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--navy-deep);color:var(--ink);
+  font-family:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+:focus-visible{outline:2px solid var(--copper-soft);outline-offset:2px}
+.screen{position:fixed;inset:0;display:none}
+.screen.on{display:flex}
+
+/* ---------- Script editor ---------- */
+#editor{flex-direction:column;overflow-y:auto;
+  padding:calc(28px + env(safe-area-inset-top)) 20px calc(28px + env(safe-area-inset-bottom))}
+.wrap{width:100%;max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{font-size:34px;line-height:1.1;letter-spacing:-.01em}
+h1 b{color:var(--copper)}
+.lede{color:var(--mute);font-size:16px;line-height:1.5;max-width:44ch}
+input,textarea{width:100%;font:inherit;color:var(--ink);background:var(--navy);
+  border:1px solid rgba(154,166,189,.25);border-radius:12px;padding:14px 16px}
+input{font-size:17px;font-weight:700}
+textarea{min-height:42vh;font-size:18px;line-height:1.55;resize:vertical}
+input::placeholder,textarea::placeholder{color:var(--mute)}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.meta{color:var(--mute);font-size:14px;margin-left:auto}
+.primary{background:var(--copper);color:var(--navy-deep);font-weight:700;font-size:18px;
+  border-radius:14px;padding:16px 20px;width:100%}
+.ghost{border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:15px}
+#status{color:var(--copper-soft);font-size:14px;min-height:1em}
+h2{font-size:18px;margin-top:14px}
+#saved{list-style:none;display:flex;flex-direction:column;border-top:1px solid rgba(154,166,189,.18)}
+#saved li{display:flex;align-items:center;border-bottom:1px solid rgba(154,166,189,.18)}
+#saved .open{flex:1;text-align:left;padding:14px 0}
+#saved .open small{display:block;color:var(--mute);font-size:13px;margin-top:2px}
+#saved .del{color:var(--mute);font-size:14px;padding:10px}
+.empty{color:var(--mute);font-size:15px;padding:12px 0}
+.quality{display:flex;gap:8px}
+.quality button{flex:1;border:1px solid rgba(154,166,189,.3);border-radius:12px;padding:12px 6px;font-size:15px}
+.quality button[aria-pressed="true"]{border-color:var(--copper);background:rgba(194,122,68,.18);font-weight:700}
+.quality button small{display:block;color:var(--mute);font-size:12px;margin-top:3px}
+
+/* ---------- Camera ---------- */
+#cam{background:#000;overflow:hidden}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#video.mirror{transform:scaleX(-1)}
+
+/* The prompter panel no longer uses a CSS mask or backdrop blur. Those made the
+   phone recompose the whole live preview every frame, which is what tore and
+   stuttered the picture while filming. */
+#prompt{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top) + 64px);height:42%;
+  overflow:hidden;touch-action:none;cursor:grab;contain:strict;
+  background:linear-gradient(to bottom,rgba(7,18,42,.82),rgba(7,18,42,.66) 72%,rgba(7,18,42,.34))}
+#promptText{position:absolute;left:0;right:0;top:0;padding:0 26px;text-align:center;
+  font-weight:700;line-height:1.35;white-space:pre-wrap;
+  will-change:transform;transform:translate3d(0,0,0);backface-visibility:hidden}
+.fade{position:absolute;left:0;right:0;height:54px;pointer-events:none}
+#fadeTop{top:0;background:linear-gradient(to bottom,rgba(7,18,42,.95),rgba(7,18,42,0))}
+#fadeBottom{bottom:0;background:linear-gradient(to top,rgba(7,18,42,.95),rgba(7,18,42,0))}
+#marker{position:absolute;left:0;right:0;height:0;pointer-events:none}
+#marker::before,#marker::after{content:"";position:absolute;top:-9px;border:9px solid transparent}
+#marker::before{left:4px;border-left:12px solid var(--copper)}
+#marker::after{right:4px;border-right:12px solid var(--copper)}
+
+.chip{background:rgba(14,30,58,.88);border:1px solid var(--line);border-radius:999px;
+  padding:9px 15px;font-size:15px}
+#topbar{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;justify-content:space-between;
+  padding:calc(12px + env(safe-area-inset-top)) 14px 0}
+#timer{font-weight:700;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px;opacity:0}
+#timer::before{content:"";width:10px;height:10px;border-radius:50%;background:#E5484D}
+.recording #timer{opacity:1}
+
+#midbar{position:absolute;left:0;right:0;bottom:calc(128px + env(safe-area-inset-bottom));
+  display:flex;justify-content:center;gap:10px}
+#bottombar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;
+  padding:18px 14px calc(18px + env(safe-area-inset-bottom));
+  background:linear-gradient(to top,rgba(7,18,42,.85),rgba(7,18,42,0))}
+.adj{display:flex;flex-direction:column;align-items:center;gap:6px;width:116px}
+.adj .ctl{display:flex;align-items:center;background:rgba(14,30,58,.88);border:1px solid var(--line);border-radius:999px}
+.adj button{width:42px;height:42px;font-size:24px;line-height:1}
+.adj output{min-width:26px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+.adj span{font-size:13px;color:var(--ink);text-shadow:0 1px 3px #000}
+#recBtn{width:78px;height:78px;border-radius:50%;border:4px solid var(--ink);display:grid;place-items:center;flex:none}
+#recBtn::after{content:"";width:58px;height:58px;border-radius:50%;background:var(--copper);transition:all .2s ease}
+.recording #recBtn::after{width:28px;height:28px;border-radius:6px}
+
+#countdown{position:absolute;inset:0;display:none;place-items:center;font-size:120px;font-weight:700;
+  color:var(--ink);text-shadow:0 4px 20px rgba(0,0,0,.7);pointer-events:none}
+#countdown.on{display:grid}
+
+#msg{position:absolute;left:20px;right:20px;top:50%;transform:translateY(-50%);display:none;
+  background:var(--navy);border:1px solid var(--line);border-radius:16px;padding:20px;line-height:1.5}
+#msg.on{display:block}
+#msg p{margin-bottom:14px}
+
+/* ---------- Review sheet ---------- */
+#review{position:fixed;inset:0;background:rgba(7,18,42,.97);display:none;flex-direction:column;gap:12px;
+  padding:calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom))}
+#review.on{display:flex}
+#review h2{margin:0}
+#reviewNote{color:var(--copper-soft);font-size:14px;line-height:1.4}
+#playback{flex:1;min-height:0;width:100%;background:#000;border-radius:14px;object-fit:contain}
+#review .row{flex-wrap:nowrap}
+#review .row > *{flex:1}
+#review .ghost{border-radius:14px;padding:16px;font-size:17px;text-align:center}
+
+#toast{position:fixed;left:50%;bottom:calc(220px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  background:var(--copper);color:var(--navy-deep);font-weight:700;padding:10px 18px;border-radius:999px;
+  opacity:0;transition:opacity .25s;pointer-events:none;z-index:10;max-width:86vw;text-align:center}
+#toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<section id="editor" class="screen on" aria-label="Script">
+  <div class="wrap">
+    <h1>Prompter<b>.</b></h1>
+    <p class="lede">Write your script, then open the camera. The words scroll over your preview but are never part of the recording.</p>
+    <input id="title" placeholder="Script name" autocomplete="off">
+    <textarea id="script" placeholder="Type or paste what you want to say."></textarea>
+    <div class="row">
+      <button id="saveBtn" class="ghost">Save script</button>
+      <button id="newBtn" class="ghost">New script</button>
+      <span id="wordInfo" class="meta"></span>
+    </div>
+    <div id="status" role="status"></div>
+    <button id="goBtn" class="primary">Open camera</button>
+
+    <h2>Video quality</h2>
+    <div class="quality" role="group" aria-label="Video quality">
+      <button id="qHigh" aria-pressed="false">1080p<small>Best picture</small></button>
+      <button id="qMed" aria-pressed="true">720p<small>Most reliable</small></button>
+    </div>
+
+    <h2>Saved scripts</h2>
+    <ul id="saved"></ul>
+  </div>
+</section>
+
+<section id="cam" class="screen" aria-label="Camera">
+  <video id="video" playsinline autoplay muted></video>
+  <div id="prompt" aria-label="Script. Tap to pause or play, drag to move.">
+    <div id="promptText"></div>
+    <div id="fadeTop" class="fade"></div>
+    <div id="fadeBottom" class="fade"></div>
+  </div>
+  <div id="marker"></div>
+
+  <div id="topbar">
+    <button id="backBtn" class="chip">Edit script</button>
+    <div id="timer">0:00</div>
+    <button id="flipBtn" class="chip">Flip camera</button>
+  </div>
+
+  <div id="midbar">
+    <button id="playBtn" class="chip">Play words</button>
+    <button id="topBtn" class="chip">Back to start</button>
+  </div>
+
+  <div id="bottombar">
+    <div class="adj">
+      <div class="ctl"><button id="slower" aria-label="Slower">−</button><output id="speedVal">4</output><button id="faster" aria-label="Faster">+</button></div>
+      <span>Speed</span>
+    </div>
+    <button id="recBtn" aria-label="Start recording"></button>
+    <div class="adj">
+      <div class="ctl"><button id="smaller" aria-label="Smaller text">−</button><output id="sizeVal">34</output><button id="bigger" aria-label="Bigger text">+</button></div>
+      <span>Text size</span>
+    </div>
+  </div>
+
+  <div id="countdown"></div>
+  <div id="msg"><p id="msgText"></p><button id="retryBtn" class="ghost">Try again</button></div>
+</section>
+
+<div id="review" aria-label="Review take">
+  <h2>Your take</h2>
+  <div id="reviewNote"></div>
+  <video id="playback" playsinline controls></video>
+  <div class="row">
+    <button id="retakeBtn" class="ghost">Retake</button>
+    <button id="keepBtn" class="primary">Save video</button>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { scripts: [], speed: 4, size: 34, currentId: null, quality: 'med' };
+const KEY = 'prompter-data';
+
+/* ---------- Storage: artifact storage when present, otherwise the phone's browser ---------- */
+async function loadStore() {
+  let raw = null;
+  try {
+    if (window.storage) { const r = await window.storage.get(KEY, false); raw = r && r.value; }
+    else raw = localStorage.getItem(KEY);
+  } catch (e) { raw = null; }
+  if (!raw) return;
+  try {
+    const d = JSON.parse(raw);
+    state.scripts = d.scripts || [];
+    state.speed = d.speed || 4;
+    state.size = d.size || 34;
+    state.quality = d.quality || 'med';
+  } catch (e) {}
+}
+async function saveStore() {
+  const payload = JSON.stringify({
+    scripts: state.scripts, speed: state.speed, size: state.size, quality: state.quality
+  });
+  try {
+    if (window.storage) await window.storage.set(KEY, payload, false);
+    else localStorage.setItem(KEY, payload);
+  } catch (e) { console.error('Save failed', e); }
+}
+
+/* ---------- Helpers ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let statusTimer;
+function status(text) {
+  $('status').textContent = text;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => { $('status').textContent = ''; }, 2500);
+}
+let toastTimer;
+function toast(text, ms) {
+  const t = $('toast'); t.textContent = text; t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), ms || 2200);
+}
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+}
+function wordCount(text) { return (text.trim().match(/\S+/g) || []).length; }
+function readTime(words) {
+  const secs = Math.round(words / 150 * 60);
+  return secs < 60 ? `about ${secs} sec` : `about ${Math.round(secs / 60)} min`;
+}
+
+/* ---------- Editor ---------- */
+function updateWordInfo() {
+  const w = wordCount($('script').value);
+  $('wordInfo').textContent = w ? `${w} words, ${readTime(w)}` : '';
+}
+function renderQuality() {
+  $('qHigh').setAttribute('aria-pressed', state.quality === 'high' ? 'true' : 'false');
+  $('qMed').setAttribute('aria-pressed', state.quality === 'med' ? 'true' : 'false');
+}
+$('qHigh').onclick = () => { state.quality = 'high'; renderQuality(); saveStore(); status('Set to 1080p'); };
+$('qMed').onclick = () => { state.quality = 'med'; renderQuality(); saveStore(); status('Set to 720p'); };
+
+function renderSaved() {
+  const ul = $('saved'); ul.innerHTML = '';
+  if (!state.scripts.length) {
+    const li = document.createElement('li');
+    li.className = 'empty'; li.textContent = 'Scripts you save will appear here.';
+    ul.appendChild(li); return;
+  }
+  state.scripts.forEach(s => {
+    const li = document.createElement('li');
+    const open = document.createElement('button');
+    open.className = 'open';
+    open.textContent = s.title;
+    const small = document.createElement('small');
+    const w = wordCount(s.text);
+    small.textContent = `${w} words, ${readTime(w)}`;
+    open.appendChild(small);
+    open.onclick = () => {
+      state.currentId = s.id;
+      $('title').value = s.title;
+      $('script').value = s.text;
+      updateWordInfo();
+      $('editor').scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    const del = document.createElement('button');
+    del.className = 'del'; del.textContent = 'Delete';
+    del.onclick = async () => {
+      if (!confirm(`Delete "${s.title}"?`)) return;
+      state.scripts = state.scripts.filter(x => x.id !== s.id);
+      if (state.currentId === s.id) state.currentId = null;
+      renderSaved(); await saveStore(); status('Script deleted');
+    };
+    li.append(open, del);
+    ul.appendChild(li);
+  });
+}
+$('script').addEventListener('input', updateWordInfo);
+$('saveBtn').onclick = async () => {
+  const text = $('script').value.trim();
+  if (!text) { status('Add some words before saving'); return; }
+  const title = $('title').value.trim() || text.split(/\s+/).slice(0, 5).join(' ');
+  const existing = state.scripts.find(x => x.id === state.currentId);
+  if (existing) { existing.title = title; existing.text = text; }
+  else {
+    state.currentId = Date.now().toString(36);
+    state.scripts.unshift({ id: state.currentId, title, text });
+  }
+  $('title').value = title;
+  renderSaved(); await saveStore(); status('Script saved');
+};
+$('newBtn').onclick = () => {
+  state.currentId = null; $('title').value = ''; $('script').value = '';
+  updateWordInfo(); $('script').focus();
+};
+
+/* ---------- Prompter scrolling ----------
+   The animation loop now runs only while the words are actually moving, so the
+   phone can give its full attention to the camera the rest of the time. */
+const promptEl = $('prompt'), promptText = $('promptText'), marker = $('marker');
+let offset = 0, scrolling = false, lastT = 0, rafId = null;
+
+const readLine = () => promptEl.clientHeight * 0.32;
+const maxOffset = () => Math.max(0, promptText.offsetHeight - state.size * 1.35);
+const clamp = v => Math.min(Math.max(v, 0), maxOffset());
+
+function applyOffset() {
+  promptText.style.transform = `translate3d(0,${(readLine() - offset).toFixed(1)}px,0)`;
+}
+function applySize() {
+  promptText.style.fontSize = state.size + 'px';
+  $('sizeVal').textContent = state.size;
+  $('speedVal').textContent = state.speed;
+  const top = promptEl.getBoundingClientRect().top;
+  marker.style.top = (top + readLine() + state.size * 0.68) + 'px';
+  offset = clamp(offset);
+  applyOffset();
+}
+function tick(t) {
+  if (!scrolling) { rafId = null; lastT = 0; return; }
+  const dt = lastT ? Math.min((t - lastT) / 1000, 0.1) : 0;
+  lastT = t;
+  offset += state.speed * 9 * (state.size / 34) * dt;
+  if (offset >= maxOffset()) { offset = maxOffset(); applyOffset(); setScrolling(false); return; }
+  applyOffset();
+  rafId = requestAnimationFrame(tick);
+}
+function setScrolling(on) {
+  scrolling = on;
+  $('playBtn').textContent = on ? 'Pause words' : 'Play words';
+  if (on && rafId === null) { lastT = 0; rafId = requestAnimationFrame(tick); }
+  if (!on && rafId !== null) { cancelAnimationFrame(rafId); rafId = null; lastT = 0; }
+}
+
+let drag = null;
+promptEl.addEventListener('pointerdown', e => {
+  drag = { y: e.clientY, start: offset, moved: false, was: scrolling };
+  setScrolling(false);
+  try { promptEl.setPointerCapture(e.pointerId); } catch (err) {}
+});
+promptEl.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dy = e.clientY - drag.y;
+  if (Math.abs(dy) > 6) drag.moved = true;
+  offset = clamp(drag.start - dy);
+  applyOffset();
+});
+function endDrag() {
+  if (!drag) return;
+  setScrolling(drag.moved ? drag.was : !drag.was);
+  drag = null;
+}
+promptEl.addEventListener('pointerup', endDrag);
+promptEl.addEventListener('pointercancel', endDrag);
+
+$('playBtn').onclick = () => setScrolling(!scrolling);
+$('topBtn').onclick = () => { setScrolling(false); offset = 0; applyOffset(); };
+$('slower').onclick = () => { state.speed = Math.max(1, state.speed - 1); applySize(); saveStore(); };
+$('faster').onclick = () => { state.speed = Math.min(10, state.speed + 1); applySize(); saveStore(); };
+$('smaller').onclick = () => { state.size = Math.max(20, state.size - 2); applySize(); saveStore(); };
+$('bigger').onclick = () => { state.size = Math.min(64, state.size + 2); applySize(); saveStore(); };
+window.addEventListener('resize', () => { if ($('cam').classList.contains('on')) applySize(); });
+
+/* ---------- Camera ---------- */
+const video = $('video');
+let stream = null, facing = 'user', wakeLock = null;
+
+function stopCam() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; video.srcObject = null;
+}
+function camError(err) {
+  const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+  let embedded = false;
+  try { embedded = window.self !== window.top; } catch (e) { embedded = true; }
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (ua.includes('Mac') && 'ontouchend' in document);
+  const android = /Android/.test(ua);
+  let text;
+  if (embedded) {
+    text = 'The camera can’t be used inside this preview window. Open the app from its own web link in Safari or Chrome.';
+  } else if (!navigator.mediaDevices) {
+    text = 'This browser can’t open the camera here. Open the app in Safari or Chrome from a secure (https) link.';
+  } else if (denied && ios) {
+    text = 'Camera or microphone is blocked. In Safari, tap the aA button in the address bar, then Website Settings, and set Camera and Microphone to Allow. If that doesn’t work, go to iPhone Settings, then Safari, and set Camera and Microphone to Ask. Then tap Try again.';
+  } else if (denied && android) {
+    text = 'Camera or microphone is blocked. In Chrome, tap the icon to the left of the web address, then Permissions, and turn on Camera and Microphone. If they’re greyed out, go to phone Settings, then Apps, then Chrome, then Permissions. Then tap Try again.';
+  } else if (denied) {
+    text = 'Camera or microphone is blocked. Click the icon to the left of the web address, allow Camera and Microphone for this site, then try again.';
+  } else {
+    text = 'The camera couldn’t start. Close any other app using it, then try again.';
+  }
+  $('msgText').textContent = text;
+  $('msg').classList.add('on');
+}
+
+/* Ask for a steady 30fps and step down if the phone can't manage. Asking for
+   more than the hardware can deliver is a common cause of a torn preview. */
+function constraintSets() {
+  const portrait = window.innerHeight >= window.innerWidth;
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: true };
+  const dims = (w, h) => portrait
+    ? { width: { ideal: h }, height: { ideal: w } }
+    : { width: { ideal: w }, height: { ideal: h } };
+  const fps = { frameRate: { ideal: 30, max: 30 } };
+  const sets = [];
+  if (state.quality === 'high') {
+    sets.push({ video: Object.assign({ facingMode: facing }, fps, dims(1920, 1080)), audio });
+  }
+  sets.push({ video: Object.assign({ facingMode: facing }, fps, dims(1280, 720)), audio });
+  sets.push({ video: { facingMode: facing }, audio: true });
+  return sets;
+}
+
+async function startCam() {
+  stopCam();
+  $('msg').classList.remove('on');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camError(null); return; }
+
+  let lastErr = null;
+  for (const c of constraintSets()) {
+    try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+    catch (err) {
+      lastErr = err;
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) break;
+    }
+  }
+  if (!stream) { camError(lastErr); return; }
+
+  video.srcObject = stream;
+  video.classList.toggle('mirror', facing === 'user');
+  try { await video.play(); } catch (e) {}
+
+  /* If the camera or mic is taken away mid-take (a phone call, another app,
+     the lens dropping out) close the take cleanly instead of losing it. */
+  stream.getTracks().forEach(t => {
+    t.onended = () => {
+      if (isRecording()) {
+        endedEarly = 'The camera or microphone stopped, so your take was saved up to that point.';
+        stopRec();
+      }
+    };
+  });
+}
+
+async function requestWake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+function releaseWake() { try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null; }
+
+$('goBtn').onclick = async () => {
+  const text = $('script').value.trim();
+  if (!text) { status('Add your script first'); $('script').focus(); return; }
+  promptText.textContent = text;
+  offset = 0; setScrolling(false);
+  show('cam');
+  applySize();
+  await startCam();
+  requestWake();
+};
+$('backBtn').onclick = () => {
+  if (isRecording()) stopRec();
+  stopCam(); releaseWake(); setScrolling(false);
+  show('editor');
+};
+$('flipBtn').onclick = () => {
+  if (isRecording() || counting) return;
+  facing = facing === 'user' ? 'environment' : 'user';
+  startCam();
+};
+$('retryBtn').onclick = startCam;
+
+/* ---------- Recording ----------
+   Only the camera and microphone are captured. The script is drawn on the
+   screen on top of the preview and never reaches the file. */
+let recorder = null, chunks = [], counting = false, recStart = 0, timerInt = null;
+let takeBlob = null, takeUrl = null, takeType = '', endedEarly = '', longWarned = false;
+
+const isRecording = () => recorder && recorder.state === 'recording';
+
+function pickType() {
+  if (!window.MediaRecorder) return null;
+  const types = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4',
+                 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  for (const t of types) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (e) {} }
+  return '';
+}
+
+/* Match the bitrate to what the camera actually gave us. The old fixed 8 Mbps
+   was more than many phones can write in real time, which is what made takes
+   cut out partway through. */
+function pickBitrate() {
+  let px = 1280 * 720;
+  try {
+    const s = stream.getVideoTracks()[0].getSettings();
+    if (s.width && s.height) px = s.width * s.height;
+  } catch (e) {}
+  if (px <= 1280 * 720) return 3000000;
+  if (px <= 1920 * 1080) return 5000000;
+  return 7000000;
+}
+
+function makeRecorder() {
+  const type = pickType();
+  if (type === null) return null;
+  const withType = o => (type ? Object.assign({ mimeType: type }, o) : Object.assign({}, o));
+  const tries = [
+    withType({ videoBitsPerSecond: pickBitrate(), audioBitsPerSecond: 128000 }),
+    withType({}),
+    {}
+  ];
+  for (const opts of tries) {
+    try { return new MediaRecorder(stream, opts); } catch (e) {}
+  }
+  return null;
+}
+
+$('recBtn').onclick = () => {
+  if (isRecording()) stopRec();
+  else if (!counting) startRec();
+};
+
+async function startRec() {
+  if (!stream) { toast('Camera isn’t on yet'); return; }
+  counting = true;
+  $('flipBtn').disabled = true;
+  const cd = $('countdown');
+  cd.classList.add('on');
+  for (const n of [3, 2, 1]) { cd.textContent = n; await sleep(1000); }
+  cd.classList.remove('on');
+  counting = false;
+  if (!stream) { $('flipBtn').disabled = false; return; }
+
+  chunks = []; endedEarly = ''; longWarned = false;
+  recorder = makeRecorder();
+  if (!recorder) { $('flipBtn').disabled = false; toast('Recording isn’t supported in this browser'); return; }
+  takeType = recorder.mimeType || 'video/webm';
+
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = finishTake;
+  recorder.onerror = () => {
+    endedEarly = 'The recording stopped early, so your take was saved up to that point.';
+    stopRec();
+  };
+
+  /* One-second slices mean a hiccup costs a second, not the whole take. */
+  try { recorder.start(1000); }
+  catch (e) { $('flipBtn').disabled = false; toast('Recording couldn’t start'); return; }
+
+  $('cam').classList.add('recording');
+  $('recBtn').setAttribute('aria-label', 'Stop recording');
+  recStart = Date.now();
+  $('timer').textContent = '0:00';
+  timerInt = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $('timer').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    if (s >= 600 && !longWarned) { longWarned = true; toast('Over 10 minutes — stop soon to be safe', 3500); }
+  }, 250);
+  setScrolling(true);
+}
+
+function stopRec() {
+  if (!recorder || recorder.state === 'inactive') return;
+  setScrolling(false);
+  clearInterval(timerInt);
+  $('cam').classList.remove('recording');
+  $('recBtn').setAttribute('aria-label', 'Start recording');
+  $('flipBtn').disabled = false;
+  try { recorder.stop(); } catch (e) { finishTake(); }
+}
+
+/* Leaving the app suspends the camera, which used to corrupt the take. Now it
+   closes the take cleanly so nothing filmed so far is lost. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (isRecording()) {
+      endedEarly = 'You left the app, so your take was saved up to that point.';
+      stopRec();
+    }
+  } else if ($('cam').classList.contains('on')) {
+    requestWake();
+    if (video.srcObject && video.paused) video.play().catch(() => {});
+  }
+});
+
+function finishTake() {
+  if (!chunks.length) { toast('Nothing was recorded, please try again'); return; }
+  takeBlob = new Blob(chunks, { type: takeType.split(';')[0] });
+  chunks = [];
+  if (takeUrl) URL.revokeObjectURL(takeUrl);
+  takeUrl = URL.createObjectURL(takeBlob);
+  const mb = Math.max(1, Math.round(takeBlob.size / 1048576));
+  $('reviewNote').textContent = endedEarly || `${mb} MB — play it through before you save.`;
+  $('playback').src = takeUrl;
+  $('review').classList.add('on');
+}
+
+function closeReview() {
+  $('playback').pause();
+  $('review').classList.remove('on');
+}
+
+$('retakeBtn').onclick = () => {
+  closeReview();
+  offset = 0; applyOffset();
+  if (!stream) startCam();
+};
+
+$('keepBtn').onclick = async () => {
+  if (!takeBlob) return;
+  const ext = takeType.includes('mp4') ? 'mp4' : 'webm';
+  const base = ($('title').value.trim() || 'take').replace(/[^\w\- ]+/g, '').replace(/\s+/g, '-').toLowerCase();
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  const name = `${base}-${stamp}.${ext}`;
+  const file = new File([takeBlob], name, { type: takeBlob.type });
+
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: name });
+      closeReview(); toast('Video saved');
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+  }
+  const a = document.createElement('a');
+  a.href = takeUrl; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  closeReview(); toast('Video downloaded');
+};
+
+/* ---------- Start ---------- */
+(async () => {
+  await loadStore();
+  renderQuality();
+  renderSaved();
+  updateWordInfo();
+})();
+</script>
+</body>
+</html>
